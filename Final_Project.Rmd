@@ -1,0 +1,600 @@
+---
+title: "Significant Feature Selection and Optimized Tumor Prediction"
+author: "Shareek & Mohammad"
+date: "2024-11-20"
+output:
+  pdf_document: default
+  html_document: default
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, echo=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(dplyr)
+library(rpart)
+library(rpart.plot)
+library(e1071)
+library(car)
+library(caret)
+library(randomForest)
+library(pROC)
+library(class)
+library(reshape2)
+```
+
+## Project Contextualization
+
+In this project we will be analyzing the Wisconsin Diagnostic Breast Cancer (WDBC) data to determine which cellular features strongly correlate with malignancy and benignity, then applying statistical and machine learning techniques to optimize predictive classification of malignant and benign tumors.
+
+This data set created by Dr. William H. Wolberg, W. Nick Street, and Olvi L. Mangasarian was used for various research, including medical literature.\
+```{r set-working-directory, echo = FALSE, include=FALSE}
+setwd("\\Users\\mnusa\\STAT 385\\Final Project")
+wdbc.data <- read.table(file="wdbc.data",sep = ",",header=FALSE)
+str(wdbc.data)
+ncol(wdbc.data)
+sum(is.na(wdbc.data))
+```
+*All feature variables are numerical except for `Diagnosis`. We will convert it from a character variable to a factor with two levels: `B` and `M`, representing benignity and malignancy respectively. Also, no NA values were found so we will not be omitting any points of data.*
+
+```{r renaming-columns, echo=FALSE, include=FALSE}
+
+#renaming the columns, to make sense
+column_names <- c(
+  "ID", "Diagnosis", 
+  paste(rep(c("Mean", "SE", "Worst"), each = 10), 
+        c("Radius", "Texture", "Perimeter", "Area", 
+          "Smoothness", "Compactness", "Concavity", 
+          "ConcavePoints", "Symmetry", "FractalDimension"), sep = "_")
+)
+
+colnames(wdbc.data) <- column_names
+wdbc.data$Diagnosis <- factor(wdbc.data$Diagnosis, levels = c("B", "M"))
+str(wdbc.data)
+levels(wdbc.data$Diagnosis)
+summary(wdbc.data)
+```
+**The calculations below are for cleaned and factored data**
+
+## Preliminary Exploratory Data Analysis
+
+The data set contains 569 observations and 32 variables. The first column is the `ID` of the patient, the second column is the diagnosis of the patient (M = malignant, B = benign), and the remaining 30 columns are the features of the cell nuclei. The features are computed from a digitized image of a fine needle aspirate (FNA) of a breast mass. They describe characteristics of the cell nuclei present in the image.\
+
+**Radius** *Distances from center to points on the perimeter*\
+**Texture** *Standard deviation of gray scale values*\
+**Perimeter** *The total distance between the “snake” points constitutes the nuclear perimeter*\
+**Area** *Counting the number of pixels on the interior of a cell and one-half the pixels in the perimeter*\
+**Smoothness** *Local variation in radius lengths*\
+**Compactness** *A measure of the compactness of a cell using the formula perimeter^2^/ area - 1.0*\
+**Concavity** *Severity of concave portions of the contour*\
+**Concave points** *Number of concave portions of the contour*\
+**Symmetry** *A measure of symmetry of a cell*\
+**FractalDimmension** *"coastline approximation" – 1, "coastline approximation" is described in Mandelbrot [2]*\
+
+```{r bar-chart, echo = FALSE, fig.width=3.5, fig.height=2}
+par(mfrow=c(1,1))
+ggplot(wdbc.data, aes(x = Diagnosis, fill = Diagnosis)) + geom_bar() + ggtitle("Count of Benign vs Malignant Tumors") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+
+The bar chart shows the distribution of `Diagnosis` in the data set, which we can see is around 60% (357) of the tumors are benign and 40% (212) are malignant.
+
+```{r box-plot, echo = FALSE, fig.width=3.5, fig.height=2}
+par(mfrow=c(2,2))
+ggplot(wdbc.data, aes(x = Diagnosis, y = Mean_Area, fill = Diagnosis)) + geom_boxplot() + ggtitle("Mean_Area of Benign vs Malignant Tumors") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+
+The boxplot shows the Malignant tumors have a higher `Mean_Area` compared to benign tumors. This indicates that `Mean_Area` could possibly be a significant feature in distinguishing between malignant and benign tumors.
+
+```{r histogram, echo = FALSE, fig.width=3.5, fig.height=2}
+ggplot(wdbc.data, aes(x = Mean_Perimeter, fill = Diagnosis)) + geom_histogram(alpha = 0.5, position = "identity", bins = 30) + ggtitle("Mean_Perimeter of Benign vs Malignant Tumors") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+
+The histogram shows the distribution of `Mean_Perimeter` in the data set. The malignant tumors have a wider range of `Mean_Perimeter` values, whereas the benign data can be seen clustering at a higher level, with values centered around 80, compared to the malignant tumors.
+
+```{r scatterplot, echo = FALSE, fig.width=3.5, fig.height=2}
+ggplot(wdbc.data, aes(x = Worst_Area, y = Mean_Area, color = Diagnosis)) + geom_point(alpha = 0.7) + ggtitle("Mean_Area vs Worst_Area of Benign and Malignant Tumors") + theme(plot.title = element_text(size = 8, hjust = 0.5))
+```
+
+The Scatterplot shows a strong positive correlation between `Mean_Area` and `Worst_Area`, regardless of diagnosis. The malignant tumors are in the upper right corner suggesting that it has larger values for both metrics.
+
+```{r multi-histogram, echo = FALSE, fig.width=3.5, fig.height=4}
+
+hist(wdbc.data$Mean_Perimeter, 
+     xlab = "Mean Perimeter",
+     main = "Histogram of Mean Perimeter",
+     col = "yellow")
+
+hist(wdbc.data$Worst_Perimeter, 
+     xlab = "Worst Perimeter",
+     main = "Histogram of Worst Perimeter",
+     col = "red")
+
+hist(wdbc.data$Mean_Radius,,
+     xlab = "Mean Radius",
+     main = "Histogram of Mean Radius",
+     col = "green")
+
+hist(wdbc.data$Worst_Area,,
+     xlab = "Mean Area",
+     main = "Histogram of Worst Area",
+     col = "orange")
+```
+
+```{r count-BandM, echo = FALSE, include=FALSE}
+# Count the number of benign and malignant tumors
+diagnosis_counts <- table(wdbc.data$Diagnosis)
+diagnosis_counts
+
+t_test_area <- t.test(Mean_Area ~ Diagnosis, data = wdbc.data)
+t_test_area
+
+t_test_Worstarea <- t.test(Worst_Area ~ Diagnosis, data = wdbc.data)
+t_test_Worstarea
+```
+
+Performing the t-test for the `Mean Area` indicates a highly significant difference in the `Mean Area` between benign and malignant tumors. The mean `Mean_Area` for benign tumors is 462.79, while for malignant tumors it is 978.38, therefore, because of the large difference in means this suggests that `Mean_Area` is a key feature we can use.
+
+When performing the t-test for `Worst_Area`, it shows a highly significant difference in `Worst_Area` between benign and malignant tumors. This is another significant feature we can use to distinguish the difference.
+
+**To further identify significant features, we will now perform a correlation analysis to identify highly correlated features.**
+
+**To support the correlation, we have a heatmap where we can visually identify the features' relationships.**
+
+```{r, echo = FALSE}
+corMatrix <- cor(wdbc.data[, sapply(wdbc.data, is.numeric)])
+ggplot(melt(corMatrix), aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0)+ theme_minimal()+
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.title = element_blank()
+  )
+
+highCorr <- which(abs(corMatrix) > 0.8 & abs(corMatrix) < 1, arr.ind = TRUE)
+correlated_pairs <- data.frame(
+  Feature1 = rownames(corMatrix)[highCorr[, 1]],
+  Feature2 = colnames(corMatrix)[highCorr[, 2]],
+  Correlation = corMatrix[highCorr]
+)
+knitr::kable(head(correlated_pairs), caption = "Highly Correlated Features")
+```
+
+### Logistic Regression Model
+
+As we are trying to find the probability of a tumor being malignant or benign based on different predictors, we must first identify the predictors with the strongest correlation. Therefore, we perform backward selection to remove insignificant predictors. Then, after running the backward selection which removed less significant variables, we must confirm the absence of multicollinearity (the correlation of several independent variables in a model).
+
+```{r, echo = FALSE, include=FALSE}
+fullModel <- lm(Mean_Radius ~ ., data = wdbc.data)
+backwardModel <- step(fullModel, direction = "backward")
+summary(backwardModel)
+```
+
+**Multicollinearity Check**
+
+**Initial Model:**
+formula = Mean_Radius ~ Mean_Perimeter + Mean_Area + Mean_Smoothness + Mean_Compactness + Mean_Concavity + Mean_FractalDimension + SE_Radius + SE_Texture + SE_Perimeter + SE_Concavity + SE_ConcavePoints + SE_FractalDimension + Worst_Radius + Worst_Texture + Worst_Perimeter + Worst_Area + Worst_Smoothness + Worst_Compactness
+
+```{r, echo = FALSE, eval=FALSE, include=FALSE}
+model1 <- lm(Mean_Radius ~ Mean_Perimeter + Mean_Area + Mean_Smoothness + 
+    Mean_Compactness + Mean_Concavity + Mean_FractalDimension + 
+    SE_Radius + SE_Texture + SE_Perimeter + SE_Concavity + SE_ConcavePoints + 
+    SE_FractalDimension + Worst_Radius + Worst_Texture + Worst_Perimeter + 
+    Worst_Area + Worst_Smoothness + Worst_Compactness, data = wdbc.data)
+vif(model1)
+```
+
+**We will now perform a VIF test to check for multicollinearity.**
+
+`Worst_Radius` has a VIF of 457.55 which is very high, so we will remove it from the model.
+
+```{r, echo = FALSE, eval=FALSE, include=FALSE}
+model2 <- lm(Mean_Radius ~ Mean_Perimeter + Mean_Area + Mean_Smoothness + 
+    Mean_Compactness + Mean_Concavity + Mean_FractalDimension + 
+    SE_Radius + SE_Texture + SE_Perimeter + SE_Concavity + SE_ConcavePoints + 
+    SE_FractalDimension + Worst_Texture + Worst_Perimeter + 
+    Worst_Area + Worst_Smoothness + Worst_Compactness, data = wdbc.data)
+vif(model2)
+```
+
+`Mean_Perimeter` has a VIF of 294.16 which is very high, so we remove it from the model.
+
+```{r, echo = FALSE, eval=FALSE, include=FALSE}
+model3 <- lm(Mean_Radius ~ Mean_Area + Mean_Smoothness + 
+    Mean_Compactness + Mean_Concavity + Mean_FractalDimension + 
+    SE_Radius + SE_Texture + SE_Perimeter + SE_Concavity + SE_ConcavePoints + 
+    SE_FractalDimension + Worst_Texture + Worst_Perimeter + 
+    Worst_Area + Worst_Smoothness + Worst_Compactness, data = wdbc.data)
+vif(model3)
+```
+
+`Worst_Area` has a VIF of 50.03 which is very high, so we remove it from the model.
+
+```{r, echo = FALSE, eval=FALSE, include=FALSE}
+model4 <- lm(Mean_Radius ~ Mean_Area + Mean_Smoothness + 
+    Mean_Compactness + Mean_Concavity + Mean_FractalDimension + 
+    SE_Radius + SE_Texture + SE_Perimeter + SE_Concavity + SE_ConcavePoints + 
+    SE_FractalDimension + Worst_Texture + Worst_Perimeter + Worst_Smoothness + Worst_Compactness, data = wdbc.data)
+vif(model4)
+```
+
+`Worst_Perimeter` has a VIF of 26.36 which is very high, so we remove it from the model.
+
+```{r, echo = FALSE, eval=FALSE, include=FALSE}
+model5 <- lm(Mean_Radius ~ Mean_Area + Mean_Smoothness + 
+    Mean_Compactness + Mean_Concavity + Mean_FractalDimension + 
+    SE_Radius + SE_Texture + SE_Perimeter + SE_Concavity + SE_ConcavePoints + 
+    SE_FractalDimension + Worst_Texture  + Worst_Smoothness + Worst_Compactness, data = wdbc.data)
+vif(model5)
+```
+
+`SE_Perimeter` has a VIF of 25.53 which is very high, so we remove it from the model.
+
+```{r, echo = FALSE, eval=FALSE, include=FALSE}
+model6 <- lm(Mean_Radius ~ Mean_Area + Mean_Smoothness + 
+    Mean_Compactness + Mean_Concavity + Mean_FractalDimension + 
+    SE_Radius + SE_Texture + SE_Concavity + SE_ConcavePoints + 
+    SE_FractalDimension + Worst_Texture  + Worst_Smoothness + Worst_Compactness, data = wdbc.data)
+vif(model6)
+```
+
+`Mean_Compactness` has a VIF of 19.78 which is high, so we remove it from the model.
+
+```{r, echo = FALSE, eval=FALSE, include=FALSE}
+model7 <- lm(Mean_Radius ~ Mean_Area + Mean_Smoothness + Mean_Concavity + Mean_FractalDimension + 
+    SE_Radius + SE_Texture + SE_Concavity + SE_ConcavePoints + 
+    SE_FractalDimension + Worst_Texture  + Worst_Smoothness + Worst_Compactness, data = wdbc.data)
+vif(model7)
+```
+
+`Mean_Concavity` has a VIF of 13.2 which is high, so we remove it from the model.
+
+```{r, echo = FALSE, eval=FALSE, include=FALSE}
+model8<- lm(Mean_Radius ~ Mean_Area + Mean_Smoothness + Mean_FractalDimension + 
+    SE_Radius + SE_Texture + SE_Concavity + SE_ConcavePoints + 
+    SE_FractalDimension + Worst_Texture  + Worst_Smoothness + Worst_Compactness, data = wdbc.data)
+vif(model8)
+```
+
+Finally we are left with `Mean_Area`, `Mean_Smoothness`, `Mean_FractalDimension`, `SE_Radius`, `SE_Texture`, `SE_Concavity`, `SE_ConcavePoints`, `SE_FractalDimension`, `Worst_Texture`, `Worst_Smoothness`, and `Worst_Compactness` which have VIF values below 5. This indicates that there is no multicollinearity between the features and we can use them in the model.
+
+```{r, echo = FALSE, include=FALSE}
+finalModel<- glm(Diagnosis ~ Mean_Area + Mean_Smoothness + Mean_FractalDimension +
+                      SE_Radius + SE_Texture + SE_Concavity + SE_ConcavePoints + 
+                      SE_FractalDimension + Worst_Texture + Worst_Smoothness + Worst_Compactness,
+                      family = binomial(link = "logit"), data = wdbc.data)
+summary(finalModel)
+
+predicted_probs <- predict(finalModel, type = "response")
+
+predicted_classes <- ifelse(predicted_probs > 0.5, "M", "B")
+
+table(Predicted = predicted_classes, Actual = wdbc.data$Diagnosis)
+```
+
+**We will now test the accuracy of the logistic regression model. We will use a confusion matrix to see how well the model predicts compared to the actual diagnosis.**
+
+Accuracy = 0.97\
+Precision for Malignant = 0.96\
+Recall for Malignant = 0.98\
+
+Looking at the results above, we can confirm that the model correctly classified 97.5% of the cases. It's a balanced performance with a high precision and recall rates with a very few misclassifications.
+
+## Model Implementations
+
+**Before we begin to run any predictive Machine Learning techniques on the model, we need to split the data into training and testing sets.**
+
+### Data Splitting
+
+```{r data-prep, echo=FALSE, include=FALSE}
+# Load the dataset
+data <- read.csv("wdbc.data", header = FALSE)
+colnames(data) <- c("ID", "Diagnosis", paste0("Feature", 1:(ncol(data) - 2)))
+
+# Convert diagnosis to a factor
+data$Diagnosis <- as.factor(data$Diagnosis)
+
+# Split the data into training and testing sets (70/30 split)
+set.seed(123)
+train_index <- createDataPartition(data$Diagnosis, p = 0.7, list = FALSE)
+train_data <- data[train_index, ]
+test_data <- data[-train_index, ]
+```
+
+We split the data into training and testing sets using a 70/30 split, and now will use the training set to train the models, and the testing set to evaluate the models.
+
+We will be modeling the data using four machine learning techniques:\
+1) Decision Tree Model\
+2) Random Forest Model\
+3) K-Nearest Neighbors (KNN) Model with Optimized `k` using Cross-Validation\
+4) Support Vector Machine with Best Kernel Identification and Hyperparameter Fine Tuning\
+
+Based off of our initial exploratory data analysis and feature relationship introduction, we decided to select these models because of the complexity of the relationship between the features in the data.
+
+### Decision Tree Model
+
+```{r decision-tree, echo=FALSE}
+# Fit a Decision Tree model
+set.seed(123)
+decision_tree <- rpart(Diagnosis ~ ., data = train_data, method = "class")
+
+# Visualize the Decision Tree with a Legend
+rpart.plot(
+  decision_tree,
+  main = "Decision Tree with Feature Legend",
+)
+
+# Add a legend manually
+legend(
+  "topright", # Position of the legend
+  legend = c("Feature 21: SE_Symmetry", "Feature 24: Worst_Compactness"),
+  col = c("black"), # Text color
+  cex = 0.8, # Adjust text size
+  box.lty = 0 # Removes the legend box
+)
+
+# Make predictions and evaluate performance
+tree_predictions <- predict(decision_tree, test_data, type = "class")
+
+# Print the names of features 21, 23, and 24
+feature_names <- colnames(wdbc.data)[c(21, 28)]
+#print(feature_names) SE_Symmetry, Worst_Compactness
+```
+```{r decision-tree-confmatrix, echo=FALSE, include=FALSE}
+confusionMatrix(tree_predictions, test_data$Diagnosis)
+```
+
+The decision tree is simple, easy to read, and achieves a strong classification performance with high accuracy, sensitivity, and specificity. Misclassifications are balanced between False Positives and False Negatives, with 7 instances each, which indicates good performance in handling both classes. Also, the strong Kappa score of 0.8235 reflects that the model performs significantly better than random guessing.
+
+### Random Forest Model
+
+```{r random-forest, echo=FALSE}
+# Fit a Random Forest model
+set.seed(123)
+random_forest <- randomForest(Diagnosis ~ ., data = train_data, ntree = 100, mtry = sqrt(ncol(train_data) - 1))
+
+# Evaluate model performance
+rf_predictions <- predict(random_forest, test_data)
+#confusionMatrix(rf_predictions, test_data$Diagnosis)
+
+# Variable importance
+#importance(random_forest)
+varImpPlot(random_forest, main = "Feature Importance")
+
+# Print the names of features 21, 23, and 24
+feature_names <- colnames(wdbc.data)[c(21, 23, 24)]
+#print(feature_names) SE_Symmetry, Worst_Radius, Worst_Texture
+
+# ROC Curve (only for binary classification)
+if (length(levels(test_data$Diagnosis)) == 2) {
+  rf_probabilities <- predict(random_forest, test_data, type = "prob")[, 2] # Probabilities for the positive class
+  roc_curve <- roc(test_data$Diagnosis, rf_probabilities, levels = rev(levels(test_data$Diagnosis)), direction = ">")
+  plot(roc_curve, col = "#1c61b6", lwd = 2, main = "ROC Curve")
+  auc_value <- auc(roc_curve)
+  legend("bottomright", legend = paste("AUC =", round(auc_value, 2)), col = "#1c61b6", lwd = 2)
+}
+
+# OOB Error Rate Plot
+plot(random_forest, main = "OOB Error Rate")
+legend("topright", legend = colnames(random_forest$err.rate), fill = 1:ncol(random_forest$err.rate), cex = 0.8)
+```
+
+The Random Forest model shows strong classification performance, with a high AUC (0.98) and low OOB error rates. Increasing the number of trees beyond 40 does not significantly improve the model, suggesting that 40-50 trees may be sufficient for this classification problem. Another point to take note of is that the model performs slightly better at classifying the benign class compared to the malignant class, which is common in imbalanced datasets because of the difference in amount of data classified for each label.
+
+As for feature importance, see here that the Random Forest model relies heavily on a few key features (`SE_Symmetry`, `Worst_Radius`, `Worst_Texture`) for classification. This suggests that these are the most significant variables. The model also exhibits diminishing returns in predictive power for less important features, which indicates that feature selection or dimensionality reduction can further optimize the model.
+
+### Optimize `k` for KNN using Cross-Validation
+
+```{r knn-optimize, echo=FALSE, include=FALSE}
+# Prepare the data: Remove ID column and ensure all predictors are numeric
+knn_train_data <- train_data[, -1]  # Remove ID column
+knn_test_data <- test_data[, -1]   # Remove ID column
+
+# Scale the features
+knn_train_scaled <- scale(knn_train_data[, -1])  # Exclude Diagnosis column
+knn_test_scaled <- scale(knn_test_data[, -1])   # Exclude Diagnosis column
+
+# Set up cross-validation for k values
+set.seed(123)
+k_values <- seq(1, 20, by = 2)  # Try odd values of k from 1 to 20
+cv_results <- data.frame(k = k_values, Accuracy = numeric(length(k_values)))
+
+# Perform cross-validation
+for (i in seq_along(k_values)) {
+  k <- k_values[i]
+  
+  # Apply KNN with cross-validation
+  cv_predictions <- knn.cv(train = knn_train_scaled, 
+                           cl = knn_train_data$Diagnosis, 
+                           k = k)
+  
+  # Calculate accuracy
+  cv_accuracy <- sum(cv_predictions == knn_train_data$Diagnosis) / length(cv_predictions)
+  
+  # Store results
+  cv_results$Accuracy[i] <- cv_accuracy
+}
+
+# Find the best k value
+best_k <- cv_results$k[which.max(cv_results$Accuracy)]
+cat("Optimal k:", best_k, "\\n")
+
+# Refit the KNN model using the optimal k
+knn_optimized_predictions <- knn(train = knn_train_scaled, 
+                                 test = knn_test_scaled, 
+                                 cl = knn_train_data$Diagnosis, 
+                                 k = best_k)
+
+# Evaluate performance of the optimized KNN
+confusionMatrix(knn_optimized_predictions, knn_test_data$Diagnosis)
+```
+``` {r knn-optimized-heatmap, echo= FALSE}
+# Plot the accuracy against k values
+ggplot(cv_results, aes(x = k, y = Accuracy)) +
+  geom_line() +
+  geom_point() +
+  ggtitle("Cross-Validation Accuracy vs k") +
+  xlab("k") +
+  ylab("Accuracy")
+```
+
+Based on the visualization of the accuracy of `k` values 0 - 20, we can conclude that the optimal value for `k` is 5. Now, we implement the KNN Model using this optimized `k` value.
+
+### K-Nearest Neighbors (KNN) Model
+
+```{r knn-model, echo=FALSE, include=TRUE}
+# Prepare the data: Remove ID column and ensure all predictors are numeric
+knn_train_data <- train_data[, -1]  # Remove ID column
+knn_test_data <- test_data[, -1]   # Remove ID column
+
+# Scale the features for KNN
+knn_train_scaled <- scale(knn_train_data[, -1])  # Exclude Diagnosis column
+knn_test_scaled <- scale(knn_test_data[, -1])   # Exclude Diagnosis column
+
+# Define the K value (start with k = 5)
+k <- 5
+set.seed(123)
+
+# Apply KNN
+knn_predictions <- knn(train = knn_train_scaled, 
+                       test = knn_test_scaled, 
+                       cl = knn_train_data$Diagnosis, 
+                       k = k)
+
+# Compute confusion matrix
+conf_matrix <- confusionMatrix(knn_predictions, knn_test_data$Diagnosis)
+
+# Extract confusion matrix as a table
+conf_table <- as.data.frame(conf_matrix$table)
+
+# Rename columns for clarity
+colnames(conf_table) <- c("Prediction", "Reference", "Freq")
+
+# Create a heatmap of the confusion matrix
+ggplot(conf_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "black") +
+  geom_text(aes(label = Freq), color = "white", size = 5) +
+  scale_fill_gradient(low = "lightblue", high = "darkblue") +
+  ggtitle("Confusion Matrix Heatmap for KNN") +
+  xlab("Actual Class") +
+  ylab("Predicted Class") +
+  theme_minimal()
+```
+
+Looking at the above heatmap presenting the results of the KNN classification, we see the model performs well overall, with a high number of correct classifications for both benign and malignant cases (only 1 benign case was misclassified as malignant). In terms of model weakness however, we see it struggles slightly with sensitivity, as 6 malignant cases were misclassified as benign. In summary, The model has strong precision for both classes, but a slight imbalance in sensitivity for malignant cases.
+
+### Support Vector Machine with Best Kernel Identification and Hyperparameter Fine Tuning (only on best kernel for optimized time complexity)
+
+```{r model-comparison, echo=FALSE, include=FALSE}
+evaluate_svm_kernel <- function(kernel, train_data, test_data, target_column) {
+  set.seed(123)
+  model <- svm(
+    as.formula(paste(target_column, "~ .")),
+    data = train_data,
+    kernel = kernel,
+    probability = TRUE
+  )
+  predictions <- predict(model, test_data)
+  accuracy <- mean(predictions == test_data[[target_column]])
+  list(kernel = kernel, accuracy = accuracy)
+}
+
+# Step 1: Identify the best kernel
+kernels <- c("linear", "radial", "polynomial", "sigmoid")
+results <- lapply(kernels, function(kernel) {
+  evaluate_svm_kernel(kernel, train_data, test_data, "Diagnosis")
+})
+
+accuracy_results <- data.frame(
+  Kernel = sapply(results, function(res) res$kernel),
+  Accuracy = sapply(results, function(res) res$accuracy)
+)
+
+best_kernel <- accuracy_results[which.max(accuracy_results$Accuracy), "Kernel"]
+cat("Best Kernel:", best_kernel, "\n")
+
+# Step 2: Hyperparameter tune the best kernel
+set.seed(123)
+tuned_model <- tune(
+  svm,
+  Diagnosis ~ .,
+  data = train_data,
+  kernel = best_kernel,
+  ranges = list(
+    cost = 2^(-1:2),
+    gamma = 2^(-2:1)
+  )
+)
+
+best_model <- tuned_model$best.model
+best_parameters <- tuned_model$best.parameters
+
+cat("Best Parameters for Kernel", best_kernel, ":\n")
+print(best_parameters)
+
+# Step 3: Evaluate the tuned model
+tuned_predictions <- predict(best_model, test_data)
+confusion_matrix <- table(Predicted = tuned_predictions, Actual = test_data$Diagnosis)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+
+cat("Tuned Model Accuracy:", accuracy, "\n")
+```
+```{r svm-model-visualization, echo=FALSE, include=TRUE}
+# Convert confusion matrix to a dataframe for visualization
+confusion_df <- as.data.frame(as.table(confusion_matrix))
+colnames(confusion_df) <- c("Predicted", "Actual", "Freq")
+
+# Create the heatmap
+ggplot(confusion_df, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile(color = "black") +
+  geom_text(aes(label = Freq), color = "white", size = 5) +
+  scale_fill_gradient(low = "lightblue", high = "darkblue") +
+  ggtitle("Confusion Matrix Heatmap for Tuned SVM Model") +
+  xlab("Actual Class") +
+  ylab("Predicted Class") +
+  theme_minimal()
+```
+
+Best Kernel: linear\
+Best Parameters for the linear Kernel: cost=0.5 and gamma=0.25\
+Tuned Model Accuracy: 0.9705882\
+
+The SVM model correctly identifies a majority of both malignant and benign cases, as seen by the high true positives (60) and true negatives (105). The number of false positives (2) is very low, indicating the model rarely misclassifies benign cases as malignant. In terms of model weakness, we see it misclassifies 3 malignant cases as benign (false negatives), but overall, the model is highly accurate with particularly strong true positive and true negative rates.
+
+## Model Comparison and Conclusion
+
+```{r model-conclusion, echo=FALSE, include=FALSE}
+# Decision Tree Accuracy
+dt_accuracy <- confusionMatrix(tree_predictions, test_data$Diagnosis)$overall["Accuracy"]
+
+# Random Forest Accuracy
+rf_accuracy <- confusionMatrix(rf_predictions, test_data$Diagnosis)$overall["Accuracy"]
+
+# KNN Accuracy
+knn_accuracy <- confusionMatrix(knn_predictions, knn_test_data$Diagnosis)$overall["Accuracy"]
+
+# Compare the accuracies
+cat("Decision Tree Accuracy:", dt_accuracy)
+cat("Random Forest Accuracy:", rf_accuracy)
+cat("KNN Accuracy:", knn_accuracy)
+cat("Tuned SVM Linear Kernel Accuracy: 0.9705882")
+```
+
+Decision Tree Accuracy: 0.9176471\
+Random Forest Accuracy: 0.9705882\
+KNN Accuracy: 0.9588235\
+Tuned SVM Linear Kernel Accuracy: 0.9705882\
+
+In conclusion, we applied and evaluated several machine learning models, including **Decision Tree**, **Random Forest**, **K-Nearest Neighbors (KNN)**, and **Support Vector Machine (SVM)**, to classify breast tumors as malignant or benign using the Wisconsin Diagnostic Breast Cancer dataset, using only the features that have are statistically significant predictors. Each model was assessed for its performance based on accuracy, precision, recall, and overall classification quality.
+
+The **Decision Tree** model achieved an accuracy of **91.76%**, making it the simplest and most interpretable model among the four options. While it performed generally well, it had balanced but slightly higher misclassification rates (false positives and false negatives), which reduced its overall reliability relative to the more advanced techniques implemented.
+
+The **Random Forest** model demonstrated very strong performance with an accuracy of **97.06%**, making it the best-performing model along with KNN. By using ensemble learning, it handled both malignant and benign cases accurately, achieving high sensitivity and specificity. Furthermore, the variable importance plot identified key features, such as SE_Symmetry, Worst_Radius, Worst_Texture, as key contributors to classification. However, the Random Forest model, while accurate, is less interpretable and viewer-friendly due to its complexity and reliance on multiple trees.
+
+The **K-Nearest Neighbors (KNN)** model, optimized with k=5 through cross-validation, achieved an accuracy of **95.88%**. The KNN model performed well overall but struggled slightly with sensitivity, misclassifying six malignant cases as benign. Its performance shows us very clearly the importance of scaling and parameter tuning for distance-based models, like KNN. The K-Nearest Neighbors Model generally provides simplicity in implementation but lacks interpretability and robustness compared to other models.
+
+Finally, the **Support Vector Machine (SVM)** model with a linear kernel was hyperparameter-tuned and achieved an accuracy of **97.06%**, tying with Random Forest as the top performer. The SVM model displayed strong precision and sensitivity, with minimal false positives (only two) and false negatives (only three). Its reliance on support vectors allows it to handle decision boundaries very efficiently. However, SVM can be time consuming and computationally expensive, especially when kernel functions require a lot of parameter tuning.
+
+In conclusion, both **Random Forest** and **SVM** emerged as the best-performing models, achieving the highest accuracy and balanced classification performance. While Random Forest is ideal for feature importance analysis and ensemble robustness, SVM is a strong contender for clean, linear separable datasets. Decision Tree and KNN are valuable for interpretability and simplicity, respectively, but they fall short in terms of overall accuracy and sensitivity. Future analysis could be fruitful if we explore deeper feature engineering, balancing techniques, and hybrid models to enhance classification performance even further.
