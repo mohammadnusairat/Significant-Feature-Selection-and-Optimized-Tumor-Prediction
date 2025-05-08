@@ -59,13 +59,13 @@ This project analyzes the **Wisconsin Diagnostic Breast Cancer (WDBC)** dataset 
 
 ## 📁 Repository Structure
 
-├── Final_Project.Rmd # RMarkdown source file
-├── Final_Project.pdf # PDF output with full analysis
-├── STAT 385 Final Project Presentation.pdf
-├── wdbc.data # Raw dataset
-├── wdbc.names # Attribute documentation
-├── .RData / .Rhistory # RStudio session files
-└── README.md # This file
+├── Final_Project.Rmd # RMarkdown source file\
+├── Final_Project.pdf # PDF output with full analysis\
+├── STAT 385 Final Project Presentation.pdf\
+├── wdbc.data # Raw dataset\
+├── wdbc.names # Attribute documentation\
+├── .RData / .Rhistory # RStudio session files\
+└── README.md # This file\
 
 ---
 
@@ -78,4 +78,4 @@ This project shows how combining **feature engineering**, **statistical analysis
 ## 📎 Related Links
 
 - 📂 Dataset: [WDBC @ UCI ML Repo](https://archive.ics.uci.edu/ml/datasets/Breast+Cancer+Wisconsin+(Diagnostic))
-- 💻 GitHub: [View Code](https://github.com/mohammadnusairat/Significant-Feature-Selection-and-Optimized-Tumor-Prediction)
+- 💻 Teammate: [View Profile](https://www.linkedin.com/in/shareekshaffie/)
